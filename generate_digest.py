@@ -170,23 +170,21 @@ def main():
     today = date.today().isoformat()
     snaps = snapshot_dates()
     today_path = next((p for d, p in snaps if d == today), None)
-    prev = [(d, p) for d, p in snaps if d < today]
-    if not today_path or not prev:
-        raise SystemExit("need today's snapshot and at least one earlier snapshot")
-    prev_date, prev_path = prev[-1]
+    if not today_path:
+        raise SystemExit("need today's snapshot")
 
     paid_rows = eligible(today_path, date.today())
-    free_rows = pick_free(eligible(prev_path, datetime.strptime(prev_date, "%Y-%m-%d").date()))
+    free_rows = pick_free(paid_rows)
 
     n_pay_shown = sum(1 for e in paid_rows if e[4]) + sum(1 for e in free_rows if e[4])
 
     head = "# Remote jobs outside the US, %s" % date.today().strftime("%B %d, %Y")
     intro_free = (
-        "The short list below is from the previous sweep (%s), so it arrives a step behind. "
-        "Subscribers get the full list the day the postings go live: **%d fresh remote postings outside the US**, "
-        "every posting linking to the original advert, pay shown where the ad shows it. "
-        "Generated daily from [job-market-daily](https://huggingface.co/datasets/Reaver1000/job-market-daily)."
-        % (prev_date, len(paid_rows))
+        "The shortlist below is today's free 20. Subscribers get the full list with every sweep: "
+        "today that is **%d fresh remote postings outside the US**, every posting linking to the original advert, "
+        "pay shown where the ad shows it. "
+        "Generated from [job-market-daily](https://huggingface.co/datasets/Reaver1000/job-market-daily)."
+        % len(paid_rows)
     )
 
     free_body = render(free_rows, with_headers=False)
@@ -197,11 +195,11 @@ def main():
         "",
         "=== PAYWALL: everything below goes in the paid section ===",
         "",
-        "## The full list, today (%d postings, no delay)" % len(paid_rows), "",
+        "## The full list from this sweep (%d postings)" % len(paid_rows), "",
         render(paid_rows, with_headers=True).rstrip(),
         "",
         "---",
-        "Method: [remote-job-engine](https://github.com/Reaver1000/remote-job-engine) sweeps 80+ public sources daily. "
+        "Method: [remote-job-engine](https://github.com/Reaver1000/remote-job-engine) sweeps 80+ public sources. "
         "The digest keeps remote postings whose recognised region is not the United States, posted within 7 days. "
         "No aggregator spam, no ghost-posting padding: everything here was live on an employer board this week. "
         "Open archive of the free shortlists: https://github.com/Reaver1000/remote-jobs-outside-the-us",
@@ -212,14 +210,14 @@ def main():
 
     free_only = [
         head, "",
-        "The daily free shortlist: 20 fresh remote postings outside the US, from the previous sweep. "
-        "Subscribers to the newsletter get the full list (%d postings today) the moment it is generated, with no delay. "
+        "The daily free shortlist: 20 fresh remote postings outside the US. "
+        "Subscribers to the newsletter get the full list with every sweep (%d postings from today's run). "
         % len(paid_rows),
-        "", "## Free shortlist (previous sweep, %s)" % prev_date, "",
+        "", "## Free shortlist (%s)" % today, "",
         free_body.rstrip(),
         "",
         "---",
-        "Method: [remote-job-engine](https://github.com/Reaver1000/remote-job-engine) sweeps 80+ public sources daily. "
+        "Method: [remote-job-engine](https://github.com/Reaver1000/remote-job-engine) sweeps 80+ public sources. "
         "Full open data: [job-market-daily](https://huggingface.co/datasets/Reaver1000/job-market-daily); "
         "live dashboard: https://reaver1000-job-market-dashboard.static.hf.space",
         "",
@@ -227,8 +225,8 @@ def main():
     with open(os.path.join(DATA, "newsletter_free_%s.md" % today), "w", encoding="utf-8") as f:
         f.write("\n".join(free_only))
 
-    print("free shortlist: %d postings (from %s sweep)" % (len(free_rows), prev_date))
-    print("paid full list: %d postings (from today)" % len(paid_rows))
+    print("free shortlist: %d postings from today's sweep" % len(free_rows))
+    print("paid full list: %d postings" % len(paid_rows))
     print("pay-marked across both: %d" % n_pay_shown)
     print("wrote newsletter_%s.md and newsletter_free_%s.md" % (today, today))
 
