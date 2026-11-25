@@ -26,4 +26,4 @@ The daily free shortlist: 20 fresh remote postings outside the US. Subscribers t
 - **Client Services Analyst - Swedish** @ Bybit (Remote, worldwide, posted 2026-11-25) - https://job-boards.eu.greenhouse.io/bybit/jobs/5042162101
 
 ---
-Method: [remote-job-engine](https://github.com/Reaver1000/remote-job-engine) sweeps 80+ public sources. Full open data: [job-market-daily](https://huggingface.co/datasets/Reaver1000/job-market-daily); live dashboard: https://reaver1000-job-market-dashboard.static.hf.space
+Method: [remote-job-engine](https://github.com/Reaver1000/remote-job-engine) sweeps 80+ public sources. Full open data: [job-market-daily](https://huggingface.co/datasets/Reaver1000/job-market-daily); live dashboard: https://reaver1000-job-market-dashboard.static.hf.space; subscribe: https://remotenotamerica.substack.com

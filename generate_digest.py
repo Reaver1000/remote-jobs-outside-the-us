@@ -88,6 +88,9 @@ def eligible(csv_path, as_of):
                 continue
             if us_only_title(r.get("title")):
                 continue
+            # never publish corrupted text: some sweep lanes bake in mojibake
+            if "\ufffd" in ((r.get("title") or "") + (r.get("location") or "") + (r.get("company") or "")):
+                continue
             reg = region_of(r.get("location"))
             if reg is None or reg == "United States":
                 continue
@@ -201,7 +204,8 @@ def main():
         "---",
         "Method: [remote-job-engine](https://github.com/Reaver1000/remote-job-engine) sweeps 80+ public sources. "
         "The digest keeps remote postings whose recognised region is not the United States, posted within 7 days. "
-        "No aggregator spam, no ghost-posting padding: everything here was live on an employer board this week. "
+        "No aggregator spam, no ghost-padding: everything here was live on an employer board this week. "
+        "Subscribe for the daily issue: https://remotenotamerica.substack.com. "
         "Open archive of the free shortlists: https://github.com/Reaver1000/remote-jobs-outside-the-us",
         "",
     ]
@@ -219,7 +223,8 @@ def main():
         "---",
         "Method: [remote-job-engine](https://github.com/Reaver1000/remote-job-engine) sweeps 80+ public sources. "
         "Full open data: [job-market-daily](https://huggingface.co/datasets/Reaver1000/job-market-daily); "
-        "live dashboard: https://reaver1000-job-market-dashboard.static.hf.space",
+        "live dashboard: https://reaver1000-job-market-dashboard.static.hf.space; "
+        "subscribe: https://remotenotamerica.substack.com",
         "",
     ]
     with open(os.path.join(DATA, "newsletter_free_%s.md" % today), "w", encoding="utf-8") as f:
