@@ -1,15 +1,17 @@
-"""Generate the daily 'remote jobs outside the US' digest.
+"""Generate the daily two-tier 'remote jobs outside the US' digest.
 
-Reads data/latest.csv and builds a markdown digest of fresh, remote, non-US
-postings: dated within the last 7 days, remote flag set, recognised region
-outside the United States. Within each region, postings that state pay come
-first. Role family is not filtered: engineering, sales, ops, design, support
-and everything else all ship, because the list serves the applicant who is
-not American, not a particular stack.
+Free tier: the top 20 postings from the PREVIOUS sweep (a day's delay), chosen
+for region spread, pay-marked first. Paid tier: the full fresh list from
+today's sweep, no delay. The delay is the product: freshness is the scarce
+good, and this pipeline's own measurements (the funnel analysis) show the
+first days of a posting's life are the ones that matter.
 
-Output: data/newsletter_YYYY-MM-DD.md, plus a console summary.
+Outputs:
+  data/newsletter_YYYY-MM-DD.md        combined post with a PAYWALL marker
+  data/newsletter_free_YYYY-MM-DD.md    free section only (GitHub README)
 """
 import csv
+import glob
 import os
 import re
 import sys
@@ -18,7 +20,8 @@ from datetime import date, datetime
 
 sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 HERE = os.path.dirname(os.path.abspath(__file__))
-LATEST = os.path.join(HERE, "data", "latest.csv")
+DATA = os.path.join(HERE, "data")
+FREE_CAP = 20
 
 REGION_RULES = [
     ("United States", r"united states|\busa\b|u\.s\.|\bus\b|\bamerica\b|new york|san francisco|los angeles|chicago|boston|austin|seattle|denver|atlanta|dallas|miami|philadelphia|phoenix|houston|washington"),
@@ -42,6 +45,17 @@ MONEY = re.compile(
 )
 
 
+US_SIGNAL = re.compile(
+    r"united states|\busa\b|u\.s\.|\bus only\b|alabama|alaska|arizona|arkansas|california|colorado|connecticut|"
+    r"delaware|florida|georgia|hawaii|idaho|illinois|indiana|iowa|kansas|kentucky|louisiana|maine|maryland|"
+    r"massachusetts|michigan|minnesota|mississippi|missouri|montana|nebraska|nevada|new hampshire|new jersey|"
+    r"new mexico|north carolina|north dakota|ohio|oklahoma|oregon|pennsylvania|rhode island|south carolina|"
+    r"south dakota|tennessee|texas|utah|vermont|virginia|washington|west virginia|wisconsin|wyoming|"
+    r"nyc|new york|san francisco|los angeles|chicago|boston|austin|seattle|denver|atlanta|dallas|miami|"
+    r"philadelphia|phoenix|houston|washington d\.?c\.?", re.I,
+)
+
+
 def region_of(loc):
     s = " %s " % str(loc or "").lower()
     for label, pattern in REGION_RULES:
@@ -52,86 +66,171 @@ def region_of(loc):
     return None
 
 
-def has_pay(title, location, source, url):
-    blob = "%s %s %s %s" % (title, location, source, url)
+def us_only_title(title):
+    """A title naming a US state or city is a strong US-only signal even when
+    the location text just says Remote. Err toward excluding: the list's
+    promise is eligibility, not completeness."""
+    return bool(US_SIGNAL.search(title or ""))
+
+
+def has_pay(r):
+    blob = "%s %s %s %s" % (r.get("title") or "", r.get("location") or "",
+                            r.get("source") or "", r.get("url") or "")
     return bool(MONEY.search(blob))
 
 
-def main():
-    today = date.today()
-    rows = list(csv.DictReader(open(LATEST, encoding="utf-8", newline="")))
-    total = len(rows)
-
-    fresh = defaultdict(list)
-    undated_remote_nonus = 0
-    for r in rows:
-        if str(r.get("remote")) != "1":
-            continue
-        reg = region_of(r.get("location"))
-        if reg is None or reg == "United States":
-            continue
-        p = (r.get("posted") or "").strip()
-        if re.match(r"\d{4}-\d{2}-\d{2}$", p):
-            age = (today - datetime.strptime(p, "%Y-%m-%d").date()).days
-            if 0 <= age <= 7:
-                fresh[reg].append((r, p, age))
-        else:
-            undated_remote_nonus += 1
-
-    def bucket(r, p, age):
-        lines = []
-        title = (r.get("title") or "").strip()
-        company = (r.get("company") or "").strip()
-        loc = (r.get("location") or "").strip()
-        url = (r.get("url") or "").strip()
-        pay = has_pay(title, loc, r.get("source") or "", url)
-        tag = " [pay in ad]" if pay else ""
-        lines.append("- **%s** @ %s%s" % (title, company, tag))
-        lines.append("  %s%s - %s" % (loc[:60], (" | posted %s" % p) if p else "", url))
-        return "\n".join(lines), pay, age
-
+def eligible(csv_path, as_of):
+    """Fresh (<=7d), remote, non-US rows with region, from one snapshot."""
     out = []
-    out.append("# Remote jobs outside the US, %s" % today.strftime("%B %d, %Y"))
-    out.append("")
-    out.append("Fresh remote postings from the last 7 days, open to applicants outside the United States. Every posting links to the original advert. Listings that show pay in their own text are marked. Generated daily from [job-market-daily](https://huggingface.co/datasets/Reaver1000/job-market-daily); the live dashboard is [here](https://reaver1000-job-market-dashboard.static.hf.space).")
-    out.append("")
+    with open(csv_path, encoding="utf-8", newline="") as f:
+        for r in csv.DictReader(f):
+            if str(r.get("remote")) != "1":
+                continue
+            if us_only_title(r.get("title")):
+                continue
+            reg = region_of(r.get("location"))
+            if reg is None or reg == "United States":
+                continue
+            p = (r.get("posted") or "").strip()
+            if not re.match(r"\d{4}-\d{2}-\d{2}$", p):
+                continue
+            age = (as_of - datetime.strptime(p, "%Y-%m-%d").date()).days
+            if 0 <= age <= 7:
+                out.append((r, p, age, reg, has_pay(r)))
+    return out
 
-    n_regions = 0
-    n_postings = 0
-    n_pay = 0
-    for reg in REGION_ORDER:
-        if reg not in fresh:
-            continue
-        n_regions += 1
-        entries = sorted(
-            ((bucket(r, p, age), r, p, age) for r, p, age in fresh[reg]),
-            key=lambda t: (not t[0][1], t[3]),
-        )
-        n_postings += len(entries)
-        n_pay += sum(1 for e in entries if e[0][1])
-        out.append("## %s (%d new this week)" % (reg, len(entries)))
-        out.append("")
-        for (text, pay, age), r, p, a in entries[:20]:
-            out.append(text)
-            out.append("")
-        if len(entries) > 20:
-            out.append("... and %d more. The full day's data is in the dataset." % (len(entries) - 20))
-            out.append("")
 
-    out.append("---")
-    out.append("Counts today: %d fresh remote postings outside the US across %d regions, %d stating pay in the advert. %d undated remote postings outside the US were left out because freshness could not be verified." % (
-        n_postings, n_regions, n_pay, undated_remote_nonus))
-    out.append("")
-    out.append("Method: [remote-job-engine](https://github.com/Reaver1000/remote-job-engine) sweeps 80+ public sources daily; the digest keeps remote postings whose recognised region is not the United States, posted within 7 days. No aggregator spam, no ghost-posting padding: if it is on this list, it was on an employer board or a verifiable lane this week.")
+def snapshot_dates():
+    dates = []
+    for p in glob.glob(os.path.join(DATA, "jobs_snapshot_*.csv")):
+        m = re.search(r"(\d{4}-\d{2}-\d{2})", p)
+        if m:
+            dates.append((m.group(1), p))
+    return sorted(dates)
 
-    body = "\n".join(out)
-    path = os.path.join(HERE, "data", "newsletter_%s.md" % today.isoformat())
-    with open(path, "w", encoding="utf-8") as f:
-        f.write(body)
-    print("regions with fresh remote non-US roles: %d" % n_regions)
-    print("fresh postings total: %d (%d state pay)" % (n_postings, n_pay))
-    print("undated remote non-US excluded: %d" % undated_remote_nonus)
-    print("wrote %s" % path)
+
+def pick_free(rows, cap=FREE_CAP):
+    """Round-robin across regions (biggest regions first), pay-marked and
+    freshest first within each region."""
+    by_reg = defaultdict(list)
+    for entry in rows:
+        by_reg[entry[3]].append(entry)
+    for reg in by_reg:
+        by_reg[reg].sort(key=lambda e: (not e[4], e[2]))
+    order = sorted(by_reg, key=lambda r: -len(by_reg[r]))
+    picked = []
+    i = 0
+    while len(picked) < cap:
+        added = False
+        for reg in order:
+            if i < len(by_reg[reg]):
+                picked.append(by_reg[reg][i])
+                added = True
+                if len(picked) >= cap:
+                    break
+        if not added:
+            break
+        i += 1
+    return picked
+
+
+def render(entries, with_headers=True):
+    lines = []
+    if with_headers:
+        by_reg = defaultdict(list)
+        for e in entries:
+            by_reg[e[3]].append(e)
+        for reg in REGION_ORDER:
+            if reg not in by_reg:
+                continue
+            lines.append("## %s (%d)" % (reg, len(by_reg[reg])))
+            lines.append("")
+            for r, p, age, _, pay in by_reg[reg]:
+                lines.append(entry_lines(r, p, pay))
+            lines.append("")
+    else:
+        for r, p, age, reg, pay in entries:
+            lines.append("- **%s** @ %s%s (%s, posted %s) - %s" % (
+                (r.get("title") or "").strip(), (r.get("company") or "").strip(),
+                " [pay shown]" if pay else "", reg, p, (r.get("url") or "").strip()))
+        lines.append("")
+    return "\n".join(lines)
+
+
+def entry_lines(r, p, pay):
+    title = (r.get("title") or "").strip()
+    company = (r.get("company") or "").strip()
+    loc = (r.get("location") or "").strip()[:60]
+    url = (r.get("url") or "").strip()
+    tag = " [pay shown]" if pay else ""
+    return "- **%s** @ %s%s\n  %s | posted %s - %s" % (title, company, tag, loc, p, url)
+
+
+def main():
+    today = date.today().isoformat()
+    snaps = snapshot_dates()
+    today_path = next((p for d, p in snaps if d == today), None)
+    prev = [(d, p) for d, p in snaps if d < today]
+    if not today_path or not prev:
+        raise SystemExit("need today's snapshot and at least one earlier snapshot")
+    prev_date, prev_path = prev[-1]
+
+    paid_rows = eligible(today_path, date.today())
+    free_rows = pick_free(eligible(prev_path, datetime.strptime(prev_date, "%Y-%m-%d").date()))
+
+    n_pay_shown = sum(1 for e in paid_rows if e[4]) + sum(1 for e in free_rows if e[4])
+
+    head = "# Remote jobs outside the US, %s" % date.today().strftime("%B %d, %Y")
+    intro_free = (
+        "The short list below is from the previous sweep (%s), so it arrives a step behind. "
+        "Subscribers get the full list the day the postings go live: **%d fresh remote postings outside the US**, "
+        "every posting linking to the original advert, pay shown where the ad shows it. "
+        "Generated daily from [job-market-daily](https://huggingface.co/datasets/Reaver1000/job-market-daily)."
+        % (prev_date, len(paid_rows))
+    )
+
+    free_body = render(free_rows, with_headers=False)
+    combined = [
+        head, "", intro_free, "",
+        "## Today's free shortlist (20)", "",
+        free_body.rstrip(),
+        "",
+        "=== PAYWALL: everything below goes in the paid section ===",
+        "",
+        "## The full list, today (%d postings, no delay)" % len(paid_rows), "",
+        render(paid_rows, with_headers=True).rstrip(),
+        "",
+        "---",
+        "Method: [remote-job-engine](https://github.com/Reaver1000/remote-job-engine) sweeps 80+ public sources daily. "
+        "The digest keeps remote postings whose recognised region is not the United States, posted within 7 days. "
+        "No aggregator spam, no ghost-posting padding: everything here was live on an employer board this week. "
+        "Open archive of the free shortlists: https://github.com/Reaver1000/remote-jobs-outside-the-us",
+        "",
+    ]
+    with open(os.path.join(DATA, "newsletter_%s.md" % today), "w", encoding="utf-8") as f:
+        f.write("\n".join(combined))
+
+    free_only = [
+        head, "",
+        "The daily free shortlist: 20 fresh remote postings outside the US, from the previous sweep. "
+        "Subscribers to the newsletter get the full list (%d postings today) the moment it is generated, with no delay. "
+        % len(paid_rows),
+        "", "## Free shortlist (previous sweep, %s)" % prev_date, "",
+        free_body.rstrip(),
+        "",
+        "---",
+        "Method: [remote-job-engine](https://github.com/Reaver1000/remote-job-engine) sweeps 80+ public sources daily. "
+        "Full open data: [job-market-daily](https://huggingface.co/datasets/Reaver1000/job-market-daily); "
+        "live dashboard: https://reaver1000-job-market-dashboard.static.hf.space",
+        "",
+    ]
+    with open(os.path.join(DATA, "newsletter_free_%s.md" % today), "w", encoding="utf-8") as f:
+        f.write("\n".join(free_only))
+
+    print("free shortlist: %d postings (from %s sweep)" % (len(free_rows), prev_date))
+    print("paid full list: %d postings (from today)" % len(paid_rows))
+    print("pay-marked across both: %d" % n_pay_shown)
+    print("wrote newsletter_%s.md and newsletter_free_%s.md" % (today, today))
 
 
 if __name__ == "__main__":
