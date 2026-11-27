@@ -1,6 +1,8 @@
 # Remote jobs outside the US, November 27, 2026
 
 The daily free shortlist: 20 fresh remote postings outside the US. Subscribers to the newsletter get the full list with every sweep (465 postings from today's run). 
+Note: the sweep query pack narrowed today to mid-level and junior operations, implementation, solutions, support and data roles. The lower count is methodology, not the market.
+
 
 ## Free shortlist (2026-11-27)
 
